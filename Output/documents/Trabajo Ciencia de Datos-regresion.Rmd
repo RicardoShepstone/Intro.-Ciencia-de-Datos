@@ -1,0 +1,1536 @@
+---
+title: "Dataset Regresión: Abalone"
+author: "Ricardo Ignacio Shepstone Aramburu"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 4
+toc-title: "Índice"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Análisis exploratorio de datos
+## Definición del problema
+El abulón (oreja del mar) es un molusco cuya concha es larga, plana y generalmente de forma ovalada. Para determinar su edad, normalmente se debe de cortar la concha, pulir, teñir con un colorante y examinar bajo un microscopio, para contar el número de anillos que se van formando conforme la cocha crece. Puesto que ciertos anillos son difíciles de contar, se determina que sumar 1.5 al número de anillos contados es una buena aproximación de la edad del individuo.
+
+Este método para determinar la edad de un abulón es complejo y tedioso, por lo que es de especial interés intentar determinar la edad tomando otro tipo de medidas. En este dataset se dispondrá de ciertas medidas físicas, como dimensiones y pesos, así como el número de anillos de un conjunto de individuos; con el fin de intentar modelizar una regresión para predecir la edad (número de anillos) a partir del sexo y las medidas físicas.
+
+En cuanto a la dependencia de las variables, tenemos que tener en cuenta que en la mayoría de las especies, un individuo crece en tamaño y aumenta en peso a lo largo de su vida, hasta llegar a cierto límite. Estas variables a su vez son dependientes entre ellas, ya que un individuo de mayor tamaño tendrá un peso mayor. Por otro lado, la edad no está directamente relacionada con el sexo, pero debido al dimorfismo sexual que existe en la mayoría de especies, el tamaño de un individuo puede verse afectado por su sexo en mayor o menor grado según la especie. En este caso particular, la variable de sexo tiene un tercer valor "Infant" que puede proporcionar cierta información sobre la edad del individuo, por lo que esta variable también tiene cierto grado de dependencia con el resto.
+
+En base a esta información se procede a plantear ciertas cuestiones e **hipótesis**:
+
+* El tamaño y el peso aumentan con la edad.
+* Si es así, ¿Que relacción hay con respecto al número de anillos?
+* ¿Alcanzan estas especies un límite de tamaño y peso?
+* ¿Cómo es la relación entre las variables de dimensión y las de peso?
+* ¿Aumentan todas las variables de tamaño en la misma proporción (están correlacionadas)?¿Y las de peso?
+* La variable sexo influye sobre las medidas físicas del individuo.
+* ¿Hay dimorfismo sexual?¿En qué grado?
+* ¿Qué relacción hay entre la edad y que un individuo sea joven ("infant") o adulto?
+
+
+
+## Preparación de los datos
+
+### Descripción de los datos
+
+A partir del dataset de abalone se puede construir un data frame que consta de 4177 observaciones y 9 variables.
+Tanto en el archivo de texto proporcionado con los datos, como en la descripción del dataset que aparece en el repositorio de UCI (<https://archive.ics.uci.edu/ml/datasets/abalone>), se puede obtener la siguiente lista con información sobre las variables:
+
+Nombre | Tipo de dato | Unidades | Descripción 
+--------- | --------------- | -------- | -------------------------- 
+Sex | Categórico nominal |   | Macho (M), hembra (F) e Infante (I).
+Length |  Cuantitativo continuo | mm | La medida más larga de la concha.
+Diameter |  Cuantitativo continuo | mm | Medida perpendicular a la longitud.
+Height |  Cuantitativo continuo | mm | Altura con la vianda.
+Whole weight |  Cuantitativo continuo | gramos | Peso del abulón.
+Shucked weight |  Cuantitativo continuo | gramos | Peso de la vianda.
+Viscera weight |  Cuantitativo continuo | gramos | Peso de vísceras tras sangrado.
+Shell weight |  Cuantitativo continuo | gramos | Peso de la concha tras secado.
+Rings |  Cuantitativo discreto |  | Número de anillos.
+
+Como se ha mencionado anteriormente, la variable de salida será el número de anillos del abulón ("Rings"), mientras que las variables de entrada serán el resto de variables.
+
+### Procesamiento de los datos
+
+> *Importación de paquetes y del dataset.*
+
+
+
+
+El primer paso sería incluir los paquetes que utilizaremos y cargar el dataset con el que se va a trabajar.
+
+```{r message=FALSE, warning=FALSE}
+require(tidyverse)
+require(readr)
+require(moments)
+require(car)
+require(corrplot)
+require(fastDummies)
+require(FactoMineR)
+require(factoextra)
+
+# Cargamos dataset
+abalone.raw <- read.csv("Input/abalone/abalone.dat", comment.char="@", header=FALSE)
+# Realizamos una copia con la que se trabajará
+abalone <- abalone.raw
+
+```
+
+Realizamos las debidas comprobaciones, y obtenemos los datos de interés para el apartado de descripción de los datos.
+
+```{r}
+#comprobamos número de columnas, filas y si se han cargado bien los datos, la estructura de estos
+nrow(abalone)
+ncol(abalone)
+str(abalone)
+summary(abalone)
+```
+
+> *Cambio de formato de los datos para trabajar con ellos.*
+
+Cambiamos nombres de las variables para poder trabajar con ellas, en la documentación también se explica que las 
+variables numéricas se han dividido entre doscientos, por lo que hay que revertir este cambio para apreciar las verdaderas magnitudes.
+
+
+```{r warning=FALSE}
+colnames(abalone)<-c('Sex', 'Length', 'Diameter', 'Height', 'Whole_weight', 
+                     'Shucked_weight', 'Viscera_weight', 'Shell_weight', 'Rings')
+abalone <- mutate_if(abalone, is.double, funs(.*200))
+```
+
+Se cambia la variable "Sex" para incluir factores.
+
+```{r}
+# factores en Sex
+abalone <- abalone %>% mutate(Sex=factor(Sex, levels = c(1,2,3), 
+                                         labels = c('M', 'F', 'I')))
+```
+
+Comprobamos como han quedado los datos:
+
+```{r}
+# comprobamos
+head(abalone)
+
+# Así es como quedan las variables:
+str(abalone)
+
+```
+
+> *Limpieza de los datos: missing values*
+
+Buscamos missing values y duplicados.
+```{r}
+# Comprobación de missing values
+sum(is.na(abalone))
+sum(is.null(abalone))
+
+# comprobamos si hay duplicados
+sum(duplicated(abalone))
+```
+
+A la hora de ver el resumen de nuestros datos, podemos apreciar que el mínimo y el máximo de la variable "Height" toman valores extraños. Los valores de cero se tratarán como missing values, por tener valores de longitud y diámetro normales. Mientras que los valores grandes de esta variable se pueden tratar como datos atípicos, aunque como veremos en las gráficas, este valor máximo extremo no correspondería con un outlier natural, si no más bien como un error.
+
+```{r}
+# El min de Height muestra un valor extraño 
+# (estos dos pueden ser missing values)
+abalone %>% filter(Height==0)
+# Podemos eliminar estos dos valores, ya que tienen valores de longitud y 
+# diámetro, pero no de altura
+abalone <- abalone[-which(abalone$Height==0),]
+```
+
+Se ha optado por prescindir de estas dos observaciones, ya que se dispone de un número grande de elementos en el dataset.
+
+> *Limpieza de los datos: anomalías en una dimensión*
+
+Para un problema de regresión dado, el estudio de las anomalías de un dataset es importante, por ejemplo para una regresión lineal estas anomalías pueden afectar al cálculo de la recta por utilizar medidas como la media que son muy sensibles a datos atípicos. Para este dataset se ha optado por calcular estas anomalías univariadas mediante el rango intercuartílico, y obtener sus posiciones para incluirlas o descartarlas del estudio de las variables.
+
+Para la obtención de las anomalías, se calculan los cuartiles y el rango intercuartílico para determinar los límites superior e inferior. El valor de estos límites determina si el valor de una observación es atípico para una variable determinada.
+
+```{r}
+# Outliers en una dimensión
+# Calculamos rango intercuartílico de todas las variables
+abalone.IQR <- abalone %>% select(-Sex) %>% apply(2, IQR)
+abalone.Quartiles <- abalone %>% select(-Sex) %>% apply(2, quantile,c(0.25,0.75))
+Upper.limit <- abalone.Quartiles[2,]+1.5*abalone.IQR
+Upper.limit
+Lower.limit <- abalone.Quartiles[1,]-1.5*abalone.IQR
+Lower.limit
+```
+
+Con los límites establecidos, se calculan las posiciones de las observaciones que toman valores fuera del rango establecido para cada variable.
+
+```{r}
+# Obtenemos los outliers para cada variable y calculamos sus posiciones 
+# Length
+Length.outliers <- which(abalone$Length>Upper.limit['Length'] | 
+                           abalone$Length<Lower.limit['Length'])
+# Diameter
+Diameter.outliers <- which(abalone$Diameter>Upper.limit['Diameter'] | 
+                             abalone$Diameter<Lower.limit['Diameter'])
+# Height
+Height.outliers <- which(abalone$Height>Upper.limit['Height'] | 
+                           abalone$Height<Lower.limit['Height'])
+# Whole_weight
+Whole_weight.outliers <- which(abalone$Whole_weight>Upper.limit['Whole_weight'] | 
+                                 abalone$Whole_weight<Lower.limit['Whole_weight'])
+# Shucked_weight
+Shucked_weight.outliers <- which(abalone$Shucked_weight>Upper.limit['Shucked_weight'] | 
+                                   abalone$Shucked_weight<Lower.limit['Shucked_weight'])
+# Viscera_weight
+Viscera_weight.outliers <- which(abalone$Viscera_weight>Upper.limit['Viscera_weight'] | 
+                                   abalone$Viscera_weight<Lower.limit['Viscera_weight'])
+# Shell_weight
+Shell_weight.outliers <- which(abalone$Shell_weight>Upper.limit['Shell_weight'] | 
+                                 abalone$Shell_weight<Lower.limit['Shell_weight'])
+# Rings
+Rings.outliers <- which(abalone$Rings>Upper.limit['Rings'] | 
+                          abalone$Rings<Lower.limit['Rings'])
+
+```
+
+Estos vectores de posición nos permitirán descartar los outliers para cada variable a voluntad. También se ha calculado un vector que incluya las posiciones de todas las observaciones cuyas variables tomen al menos un valor atípico, es decir, se han calculado todas las observaciones atípicas. Veremos también que cantidad de outliers tenemos para tener una idea de la proporción de datos atípicos en el dataset.
+
+```{r}
+# Comprobamos cantidad de outliers 
+
+abalone.outliers <- unique(c(Length.outliers, Diameter.outliers, Height.outliers,
+                             Whole_weight.outliers, Shucked_weight.outliers, 
+                             Viscera_weight.outliers, Shell_weight.outliers, 
+                             Rings.outliers))
+length(abalone.outliers)
+
+```
+
+> *Irregularidades*
+
+Cabe destacar que al inspeccionar el dataset en detalle se ha encontrado lo que podría parecer una irregularidad en la variable "Sex", y es que hay ciertas observaciones que toman el valor "infant" con un mayor número de anillos que otras observaciones "male" o "female".
+
+Si agrupamos por sexo ,y visualizamos el máximo y mínimo del número de anillos por grupo, podemos apreciar esta irregularidad, incluso excluyendo los outliers univariados.
+
+```{r}
+# valores extraños en infants
+abalone[abalone.outliers,] %>% group_by(Sex) %>% summarise(min.Rings=min(Rings), 
+                                                           max.rings=max(Rings))
+```
+
+Como veremos en las representaciones gráficas de las variables, estos valores no se tratan de valores puntuales, y existe cierto solapamiento de las distribuciones. Las únicas explicaciones razonables que podría formular, sin ser un experto en la materia, serían que dependiendo de la especie de abulón a la que pertenece un individuo o el medio en el que se desarrolla, tardaría más o menos en llegar a la madurez sexual para ser catalogado por sexo; o bien, que para cierto grupo de individuos se haya hecho complicado determinar su sexo y se hayan catalogado en el grupo "infant".
+
+
+### Resumen de los datos
+
+Una vez procesados los datos pasamos al estudio de estos, ya sea mediante la estadística descriptiva con diferentes medidas numéricas, o la representación gráfica, tanto de cada variable como de las posibles combinaciones entre ellas. Con "summary()" podríamos visualizar algunas de ellas para cada variable, pero se ha obtado por su cálculo para almacenarlas en vectores por si su uso hiciese falta.
+
+```{r}
+# Con summary() podemos obtener la media y cuartiles
+summary(abalone)
+```
+
+> *Medidas de tendencia central*
+
+Nos permiten obtener cierta idea de centro de nuestros datos.
+
+```{r}
+# como lista:
+abalone.mean.median <- abalone %>% select(-Sex) %>% 
+  apply(2,function(x){list(media=mean(x), mediana=median(x))})
+
+# Como vector
+abalone.mean <- abalone %>% select(-Sex) %>% map_dbl(mean)
+abalone.median <- abalone %>% select(-Sex) %>% map_dbl(median)
+
+abalone.mean
+abalone.median
+
+```
+
+Ya con la media y la mediana, obtenemos cierta idea sobre la asimetría en las distribuciones de nuestras variables. Puesto que las medidas de dimensiones tienen una media menor a la mediana, el "skewness" es negativo. Mientras que en el resto de las variables ocurre lo contrario y el "skewness" es positivo.
+
+
+> *Medidas de dispersión*
+
+Estas medidas nos proporcionan información de la dispersión de nuestros datos, y de la distancia a la que se encuentran del centro. Sus cálculos son sencillos, contando que además los cálculos para los cuartiles y el rango intercuartílico se ha hecho anteriormente para el estudio de los datos atípicos.
+```{r}
+# Medidas de dispersión
+# Para el Rango, máximo y mínimo:
+abalone.min.max <- abalone %>% select(-Sex) %>% apply(2,range)
+abalone.range <- abalone.min.max[2,]-abalone.min.max[1,]
+abalone.min.max.range <- rbind(abalone.min.max, abalone.range)
+rownames(abalone.min.max.range) <- c('min', 'max', 'range')
+abalone.min.max.range             
+
+# primer cuartil, tercer cuartil y rango intercuartílico.
+abalone.Quartiles
+abalone.IQR
+
+# varianza, desviación típica y desviación absoluta de la mediana
+abalone.var <- abalone %>% select(-Sex) %>% map_dbl(var)
+abalone.sd <- abalone %>% select(-Sex) %>% map_dbl(sd)
+abalone.mad <- abalone %>% select(-Sex) %>% map_dbl(mad)
+
+abalone.var
+abalone.sd 
+abalone.mad
+
+```
+
+Cabe destacar que el rango de la variable "Height" es en proporción muy superior a las de las otras dos variables, y que esta proporción no se cumple en el rango intercuartílico. Esto es debido al valor extremo que toma uno de los datos en esta variable y que tendremos que ir descartar para su estudio. Por otro lado la varianza de "Whole weight" es muy superior a la varianza del resto de variables, lo cual puede afectar a la varianza al intentar modelar una regresión con respecto a la variable de salida.
+
+> *Medidas de forma*
+
+Como su nombre indica, las medidas de forma nos proporcionan información sobre la forma de la distribución para una variable. Ya sea una medida de asimetría (skewness) o el tipo de pico que presenta (kurtosis).
+
+```{r}
+# Medidas de forma
+abalone.skewness <- abalone %>% select(-Sex) %>% map_dbl(skewness)
+abalone.kurtosis <- abalone %>% select(-Sex) %>% map_dbl(kurtosis)
+
+abalone.skewness
+abalone.kurtosis
+
+abalone.skewness2 <- abalone[-abalone.outliers,] %>% select(-Sex) %>% 
+  map_dbl(skewness)
+abalone.kurtosis2 <- abalone[-abalone.outliers,] %>% select(-Sex) %>% 
+  map_dbl(kurtosis)
+abalone.skewness2
+abalone.kurtosis2
+
+```
+
+Antes se había mencionado que las variables que tenían skewness positivo o negativo según la media y mediana, y por lo general se ha cumplido menos para la variable "Height" que también muestra un valor extremo de kurtosis. Esto se ha corregido eliminando los datos atípicos del estudio, que ahora proporciona valores más lógicos y un skewness negativo para las variables de dimensión
+
+> *Comprobación de normalidad*
+
+Aunque para los algoritmos de regresión que vamos a utilizar no sea de extrema importancia que las distribuciones se asemejen a una normal como para ciertos algoritmos de clasificación, se comprobará igualmente debido a que muchos procesos estadísticos asumen que los datos se distribuyen normalemente, como por ejemplo ciertos tests estadísticos requieren que nuestras variables se distribuyan normalmente. Para comprobar la normalidad de nuestros datos, se aplicará el test de Shapiro-Wilk.
+
+```{r}
+# Comprobamos normalidad con shapiro
+
+abalone.shapiro <- apply(abalone[-abalone.outliers,-1],2,shapiro.test)
+abalone.shapiro
+```
+Incluso sin considerar los outliers se obtiene un p-valor muy bajo para todas las variables, menor a 0.05, por lo que el test nos informa de que hay suficiente evidencia estadística que nuestras distribuciones son diferentes a una normal.
+
+> *Gráficas univariables de los atributos*
+
+Para esta sección, se han efectuado tres diagramas para cada variable: un histograma, un diagrama de cajas para visualizar la naturaleza de los datos atípicos y un diagrama de densidad para apreciar mejor la distribución. Cabe destacar que para las variables de tamaño se ha utilizado el color azul, mientras que para las de peso el color verde y la variable de salida en rojo.
+
+Empezaremos por la única variable categórica, la variable "Sex": 
+
+```{r}
+counts.sex <- table(abalone$Sex)
+counts.sex
+barplot(counts.sex, main='Distribución por sexo', xlab='sexo',ylim = c(0,2000))
+```
+
+En este gráfico podemos apreciar la cantidad de observaciones de las que disponemos por sexo, siendo la mayoría de los individuos de la clase "male" (1528 observaciones), seguido por la clase "infant" (1340 observaciones), y por último la clase "female" (1528 observaciones). Cabe destacar que con estos valores podemos afirmar que las clases no están muy desbalanceadas.
+
+
+Para la variable "Length":
+
+```{r}
+# Para Length
+ggplot(abalone, aes(x=Length)) + 
+  geom_histogram(bins=25, color='blue',fill='blue')+
+  labs(x='Length', title = 'Histograma de la variable Length')+
+  scale_y_continuous(breaks = seq(from=0, to=500, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=170, by=10))
+
+
+ggplot(abalone, aes(y=Length)) + 
+  geom_boxplot(fill='blue',outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Length', title = 'Diagrama de cajas de la variable Length')+
+  scale_y_continuous(breaks = seq(from=0, to=170, by=10))
+
+
+ggplot(data=abalone, aes(x=Length, fill="blue"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'blue', fill='blue') +
+  xlab("Length") + ylab("Density") + 
+  ggtitle("Curva de densidad de Length")
+```
+
+Como se ha mencionado anteriormente, se puede apreciar un "skewness" negativo, es decir la cola más larga de la distribución se encuentra a la izquierda con respecto al centro. También cabe destacar que todos los outliers de esta variable toman valores pequeños estando por debajo del umbral.
+
+Para la variable "Diameter":
+
+```{r}
+
+# Para Diameter
+ggplot(abalone, aes(x=Diameter)) + 
+  geom_histogram(bins=25, color='blue',fill='blue')+
+  labs(x='Diameter', title = 'Histograma de la variable Diameter')+
+  scale_y_continuous(breaks = seq(from=0, to=500, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=170, by=10))
+
+
+ggplot(abalone, aes(y=Diameter)) + 
+  geom_boxplot(fill='blue',outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Diameter', title = 'Diagrama de cajas de la variable Diameter')+
+  scale_y_continuous(breaks = seq(from=0, to=170, by=10))
+
+
+ggplot(data=abalone, aes(x=Diameter, fill="blue"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'blue', fill='blue') +
+  xlab("Diameter") + ylab("Density") + 
+  ggtitle("Curva de densidad de Diameter")
+
+```
+
+Tenemos una distribución muy similar a la que tenemos en la variable "Length", con los outliers estando por debajo también. Esto me lleva a pensar que la forma ovalada que toman los abulones se conserva independientemente del tamaño. Sería interesante estudiar estas dos variables juntas y la correlación que hay entre ambas para confirmarlo.
+
+Para la variable "Height":
+
+```{r}
+# Para Height
+ggplot(abalone, aes(x=Height)) + 
+  geom_histogram(bins=50, color='blue',fill='blue')+
+  labs(x='Height', title = 'Histograma de la variable Height',
+       subtitle = 'Con los outliers de Height')+
+  scale_y_continuous(breaks = seq(from=0, to=1200, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=240, by=10))
+# comentar que se ha tenido que coger un mayor número de bins por el outlier
+
+# Sin outliers:
+ggplot(abalone[-Height.outliers,], aes(x=Height)) + 
+  geom_histogram(bins=20, color='blue',fill='blue')+
+  labs(x='Height', title = 'Histograma de la variable Height', 
+       subtitle = 'Sin los outliers de Height')+
+  scale_y_continuous(breaks = seq(from=0, to=500, by=20))+
+  scale_x_continuous(breaks = seq(from=0, to=60, by=5))
+
+
+# boxplot con outliers
+ggplot(abalone, aes(y=Height)) + 
+  geom_boxplot(fill='blue',outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Height', title = 'Diagrama de cajas de la variable Height', 
+       subtitle = 'Con los outliers de Height')+
+  scale_y_continuous(breaks = seq(from=0, to=250, by=10))
+# boxplot sin outliers (quitar los calculados)
+ggplot(abalone[-Height.outliers,], aes(y=Height)) + 
+  geom_boxplot(fill='blue')+
+  labs(y='Height', title = 'Diagrama de cajas de la variable Height', 
+       subtitle = 'Sin los outliers de Height')+
+  scale_y_continuous(breaks = seq(from=0, to=250, by=10))
+
+# curva densidad
+ggplot(data=abalone, aes(x=Height, fill="blue"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'blue', fill='blue') +
+  xlab("Height") + ylab("Density") + 
+  ggtitle("Curva de densidad de Height", subtitle = 'Con los outliers de Height')
+
+# Sin outliers
+ggplot(data=abalone[-Height.outliers,], aes(x=Height, fill="blue"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'blue', fill='blue') +
+  xlab("Height") + ylab("Density") + 
+  ggtitle("Curva de densidad de Height", subtitle = 'Sin los outliers de Height')
+
+```
+
+El valor extremo dificultaba la visualización por lo que para esta variable se ha mostrado también las mismas gráficas sin los outliers, aunque el boxplot si nos confirma de que se trata de un valor demasiado extremo para ser normal. Si buscamos los dos valores:
+
+```{r}
+abalone %>% filter(Height>100)
+```
+
+El primer elemento se podría dar, ya que su valor de "Height" no supera al de "Length" y "Diameter". En el segundo caso, está claro de que se trata de un error en los datos, ya que esta variable supera de manera desproporcionada a las otras dos.
+
+En cuanto a las gráficas, cabe destacar que tenemos un "skewness" negativo, pero no se parece tanto a las otras dos, y es que esta variable se mide teniendo en cuenta la vianda del molusco, por lo que no podemos descartar que la concha no conserve su forma conforme crece en tamaño.
+
+Para la variable "Whole weight":
+
+```{r}
+# Whole_weight
+ggplot(abalone, aes(x=Whole_weight)) + 
+  geom_histogram(bins=24, color='green',fill='green')+
+  labs(x='Whole_weight', title = 'Histograma de la variable Whole_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=400, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=600, by=50))
+
+
+ggplot(abalone, aes(y=Whole_weight)) + 
+  geom_boxplot(fill='green',outlier.colour = 'green', outlier.shape = 3)+
+  labs(y='Whole_weight', title = 'Diagrama de cajas de la variable Whole_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=600, by=50))
+
+
+ggplot(data=abalone, aes(x=Whole_weight, fill="green"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'green', fill='green') +
+  xlab("Whole_weight") + ylab("Density") + 
+  ggtitle("Curva de densidad de Whole_weight")
+
+```
+
+En esta variable de peso tenemos el caso contrario a las dos primeras de tamaño, el "skewness" es positivo, y en este caso los valores atípicos se encuentran por encima del umbral superior. También cabe destacar que en el diagrama de densidad se pueden apreciar dos picos de casi la misma altura (casi una distribución bimodal).
+
+Para "Shucked weight":
+
+```{r}
+# Shucked_weight
+ggplot(abalone, aes(x=Shucked_weight)) + 
+  geom_histogram(bins=25, color='green',fill='green')+
+  labs(x='Shucked_weight', title = 'Histograma de la variable Shucked_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=500, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=300, by=25))
+
+
+ggplot(abalone, aes(y=Shucked_weight)) + 
+  geom_boxplot(fill='green',outlier.colour = 'green', outlier.shape = 3)+
+  labs(y='Shucked_weight', title = 'Diagrama de cajas de la variable Shucked_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=300, by=20))
+
+
+ggplot(data=abalone, aes(x=Shucked_weight, fill="green"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'green', fill='green') +
+  xlab("Shucked_weight") + ylab("Density") + 
+  ggtitle("Curva de densidad de Shucked_weight")
+```
+
+Tenemos una distribución similar a "whole weight" pero con un único pico. Los datos atípicos también se encuentran por encima del umbral superior, y el "skewness" es también positivo.
+
+Para la variable "Viscera weight"
+
+```{r}
+# Viscera_weight
+ggplot(abalone, aes(x=Viscera_weight)) + 
+  geom_histogram(bins=25, color='green',fill='green')+
+  labs(x='Viscera_weight', title = 'Histograma de la variable Viscera_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=450, by=25))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+
+
+ggplot(abalone, aes(y=Viscera_weight)) + 
+  geom_boxplot(fill='green',outlier.colour = 'green', outlier.shape = 3)+
+  labs(y='Viscera_weight', title = 'Diagrama de cajas de la variable Viscera_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=160, by=10))
+
+
+ggplot(data=abalone, aes(x=Viscera_weight, fill="green"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'green', fill='green') +
+  xlab("Viscera_weight") + ylab("Density") + 
+  ggtitle("Curva de densidad de Viscera_weight")
+```
+
+Similar al resto de variables de peso, "skewness" positivo, y datos atípicos con valores altos.
+
+Para las variable "Shell weight"
+
+```{r}
+# Shell_weight
+ggplot(abalone, aes(x=Shell_weight)) + 
+  geom_histogram(bins=25, color='green',fill='green')+
+  labs(x='Shell_weight', title = 'Histograma de la variable Shell_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=500, by=25))+
+  scale_x_continuous(breaks = seq(from=0, to=210, by=10))
+
+
+ggplot(abalone, aes(y=Shell_weight)) + 
+  geom_boxplot(fill='green',outlier.colour = 'green', outlier.shape = 3)+
+  labs(y='Shell_weight', title = 'Diagrama de cajas de la variable Shell_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=210, by=10))
+
+
+ggplot(data=abalone, aes(x=Shell_weight, fill="green"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'green', fill='green') +
+  xlab("Shell_weight") + ylab("Density") + 
+  ggtitle("Curva de densidad de Shell_weight")
+
+```
+
+En este caso se obtiene una distribución similar al resto, con outliers con valores altos, pero mirando la función de densidad, parece que tiene dos picos. Fijándonos en todas las distribuciones de las variables de peso, podríamos suponer que la distribución del peso total es aproximadamente la suma de las otras tres, más adelante veremos la correlacción que hay entre estas variables.
+
+Por último podemos representar la variable de salida "Rings":
+
+```{r}
+# Rings (variable de salida)
+ggplot(abalone, aes(x=Rings)) + 
+  geom_histogram(bins=length(unique(abalone$Rings)), color='Red',fill='Red')+
+  labs(x='Rings', title = 'Histograma de la variable Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=700, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=30, by=1))
+
+
+ggplot(abalone, aes(y=Rings)) + 
+  geom_boxplot(fill='Red',outlier.colour = 'Red', outlier.shape = 3)+
+  labs(y='Rings', title = 'Diagrama de cajas de la variable Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))
+
+
+ggplot(data=abalone, aes(x=Rings, fill="Red"))+
+  geom_density(stat="density", alpha=I(0.2), color= 'Red', fill='Red') +
+  xlab("Rings") + ylab("Density") + 
+  ggtitle("Curva de densidad de Rings")
+```
+
+La distribución de la variable de salida es la más puntiaguda (con mayor medida del coeficiente de kurtosis) y lo que quiere decir que los valores de los individuos se encuentran más centrados. Su función de densidad tiene forma de sierra debido a que toma valores enteros (valores discretos).
+
+> *Gráficas bivariables de los atributos*
+
+Al ser la variable "Sex" la única categórica, la analizaremos la primera con respecto al resto de variables, y así podremos comprobar algunas de las hipótesis planteadas. Para representar esta varaible frente a las demás se han hecho uso de diagramas de cajas e histogramas.
+
+Empezamos por analizar el par "Sex-Length":
+```{r}
+# sex-Length
+
+ggplot(abalone, aes(x=Length, fill=Sex)) + 
+  geom_histogram(bins=30,  color='black', alpha=0.5, position='identity')+
+  labs(x='Length', title = 'Histograma de Length en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=240, by=20))+
+  scale_x_continuous(breaks = seq(from=0, to=170, by=10))
+
+ggplot(abalone, aes(y=Length, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Length', title = 'Diagrama de cajas de la variable Length por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=170, by=10))
+```
+
+Sorprendentemente no se puede apreciar mucha diferencia en la longitud entre los dos sexos, como mucho se puede observar mayor dispersión en los datos para los machos que para las hembras (mayor número de outliers también). Donde si hay una diferencia es en la categoría "infant" cuya distribución toma valores menores con cierto solapamiento con las distribuciones de las otras dos categorías. Este fenómeno ya se comentó anteriormente y se dieron algunas posibles explicaciones de lo que podría estar ocurriendo.
+
+Analizamos "Sex-Diameter":
+
+```{r}
+#sex-Diameter
+
+ggplot(abalone, aes(x=Diameter, fill=Sex)) + 
+  geom_histogram(bins=30,  color='black', alpha=0.5, position='identity')+
+  labs(x='Diameter', title = 'Histograma de Diameter en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=200, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=170, by=10))
+
+ggplot(abalone, aes(y=Diameter, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Diameter', title = 'Diagrama de cajas de la variable Diameter por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=170, by=10))
+```
+
+De la misma forma, no se aprecia mucha diferencia en esta dimensión tampoco entre los dos sexos, hay que remarcar que la categoría de "male" tiene mayores frecuencias para algunos intervalos mayores que "female", pero esto se podría deber a que es la clase con el mayor número de individuos, mientras que "female" es la que menos individuos tiene de las tres. En este caso se aprecia lo mismo con respecto a la clase "infant" que en el gráfico anterior. Cabe destacar que esta clase es la que menos outliers tiene de las tres para estas variables.
+
+
+Para "Sex-Height":
+
+```{r}
+#sex-Height
+
+ggplot(abalone[-Height.outliers,], aes(x=Height, fill=Sex)) + 
+  geom_histogram(bins=21,  color='black', alpha=0.5, position='identity')+
+  labs(x='Height', title = 'Histograma de Height en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=1500, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=250, by=20))
+
+ggplot(abalone[-Height.outliers,], aes(y=Height, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Height', title = 'Diagrama de cajas de la variable Height por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=170, by=10))
+
+```
+
+Para este par de variables se aprecia una mayor dispersión para los machos que para las hembras, pero no hay diferencias grandes entre sus distribuciones. Para los "infants" tenemos lo mismo que para las otras medidas de tamaño.
+
+Pasamos a las medidas de peso, comenzando por el par "Sex-Whole weight":
+
+```{r}
+#sex-Whole Weight
+
+ggplot(abalone, aes(x=Whole_weight, fill=Sex)) + 
+  geom_histogram(bins=30,  color='black', alpha=0.5, position='identity')+
+  labs(x='Whole_weight', title = 'Histograma de Whole_weight en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=400, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=600, by=50))
+
+ggplot(abalone, aes(y=Whole_weight, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Whole_weight', 
+       title = 'Diagrama de cajas de la variable Whole_weight por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=600, by=50))
+```
+
+En este caso se puede apreciar que las distribución de "infant" está más separada de las otras dos debido a que es la más asimétrica, y adermás, las variables de peso tenían un "skewness" positivo. Esto hace que la mayoría de los individuos de este grupo tome valores bajos para "Whole weight" y un solapamiento ligeramente menor.
+
+Para el caso de "Sex-Shucked weight":
+```{r}
+#sex-Shucked_weight
+
+ggplot(abalone, aes(x=Shucked_weight, fill=Sex)) + 
+  geom_histogram(bins=30,  color='black', alpha=0.5, position='identity')+
+  labs(x='Shucked_weight', title = 'Histograma de Shucked_weight en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=250, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=300, by=20))
+
+ggplot(abalone, aes(y=Shucked_weight, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Shucked_weight', 
+       title = 'Diagrama de cajas de la variable Shucked_weight por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=300, by=20))
+```
+
+No hay tantas diferencias en los gráficos con respecto al par de variables anterior, igual puede ser que las distribuciones de "male" y "female" sean algo más asimétricas.
+
+Para el par "Sex-Viscera weight":
+
+```{r}
+#sex-Viscera_weight
+
+ggplot(abalone, aes(x=Viscera_weight, fill=Sex)) + 
+  geom_histogram(bins=30,  color='black', alpha=0.5, position='identity')+
+  labs(x='Viscera_weight', title = 'Histograma de Viscera_weight en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=260, by=20))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+
+ggplot(abalone, aes(y=Viscera_weight, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Viscera_weight', 
+       title = 'Diagrama de cajas de la variable Viscera_weight por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=170, by=10))
+
+```
+No hay diferencias apreciabres, como mucho que las distribuciones son más simétricas y que la categoría "female" tiene muy pocos outliers para esta variable.
+
+Ahora con el par "Sex-Shell weight":
+
+```{r}
+#sex-Shell_weight
+
+ggplot(abalone, aes(x=Shell_weight, fill=Sex)) + 
+  geom_histogram(bins=30,  color='black', alpha=0.5, position='identity')+
+  labs(x='Shell_weight', title = 'Histograma de Shell_weight en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=250, by=20))+
+  scale_x_continuous(breaks = seq(from=0, to=200, by=10))
+
+ggplot(abalone, aes(y=Shell_weight, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Shell_weight', 
+       title = 'Diagrama de cajas de la variable Shell_weight por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=200, by=10))
+```
+
+No hay mucho que añadir para esta variable que no se haya visto para las anteriores variables de peso, parece que estas variables quedan en su mayor parte explicadas por la variable del peso completo "whole weight".
+
+Con respecto a la variable de salida "Sex-Rings":
+
+```{r}
+#sex-Rings
+
+ggplot(abalone, aes(x=Rings, fill=Sex)) + 
+  geom_histogram(bins=length(unique(abalone$Rings)),  color='black', alpha=0.5, 
+                 position='identity')+
+  labs(x='Rings', title = 'Histograma de Rings en función del sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=300, by=20))+
+  scale_x_continuous(breaks = seq(from=0, to=30, by=1))
+
+ggplot(abalone, aes(y=Rings, x=Sex)) + 
+  geom_boxplot(aes(fill=Sex),outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Rings', title = 'Diagrama de cajas de la variable Rings por sexo')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))
+```
+
+En este caso es donde parece que hay el mayor solapamiento entre las categorías de la variable "Sex", lo que es curioso por la relación entre el número de anillos y la edad del individuo. En la sección de irregularidades del apartado de procesamiento de los datos se plantean dos posibles hipótesis del motivo de esta ocurrencia.
+
+Una vez estudiados los pares con la variable categórica "Sex", pasamos a estudiar los pares de variables numéricas empezando con las de tamaño. Este estudio es importante ya que permite ver outliers multivariantes, por lo tanto se empleará el conjunto de datos sin los outliers univariados a no ser que se especifique lo contrario. También es importante porque permite visualizar las interacciones y la relación que hay entre las variables. Para representar los pares de variables se usarán gráficos de dispersión y Se seguirá el mismo código de colores descrito anteriormente.
+
+Par de variables "Length-Diameter":
+```{r}
+
+# Length-Diameter
+
+ggplot(abalone[-abalone.outliers,],aes(x=Length, y=Diameter)) + geom_point(color='Blue')+  
+  geom_smooth(method=lm, color='Red')+
+labs(title = 'Diagrama de dispersión entre Length y Diameter')+
+  scale_y_continuous(breaks = seq(from=0, to=150, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+
+```
+
+Podemos distinguir un punto que puede ser un posible dato anómalo.
+
+```{r}
+abalone[-abalone.outliers,] %>% filter(Diameter<75, Length>120)
+
+```
+
+Este tipo de datos atípicos pueden afectar a la calidad de la recta de regresión, aunque su influencia no es tan grande debido a la gran cantidad de observaciones que siguen la distribución. Recordamos que la media es sensible a datos de valores extremos, por lo que lo más indicado para la regresión lineal sería eliminar los datos atípicos.
+
+Por otro lado, se puede apreciar una correlación bastante alta, y por lo general parece que la forma ovalada de la concha tiene a mantenerse en las mismas proporciones conforme esta crece. Para este par de variables parece que hay homocedasticidad, ya que tenemos un número mayor de individuos de tamaño medio-grande y eso puede afectar a la varianza.
+
+
+Para el par de variables "Length-Height":
+
+```{r}
+ggplot(abalone[-abalone.outliers,],aes(x=Length, y=Height)) + geom_point(color='Blue')+  
+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Length y Height')+
+  scale_y_continuous(breaks = seq(from=0, to=50, by=2))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+
+```
+
+En este caso aunque también haya bastante correlación, la dispersión de los datos es mayor. Esto es debido a que la variable "Height" no solo comprende parte de la concha, si no parte de la vianda también; lo que puede producir esa mayor variabilidad.
+
+Si la representamos con respecto a "Diameter":
+
+```{r}
+ggplot(abalone[-abalone.outliers,],aes(x=Diameter, y=Height)) + geom_point(color='Blue')+  
+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Diameter y Height')+
+  scale_y_continuous(breaks = seq(from=0, to=150, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+```
+
+Se obtiene un resultado muy similar al gráfico anterior, con mucha dispersión en la variable height. Cabe destacar que la heterocedasticidad puede ser un problema a la hora de modelar la regresión entre las dos variables de tamaño y la variable "Height".
+
+Ahora se estudiarán las variables de peso por pares. Comenzando por "Whole weight-Shucked weight"
+
+```{r}
+# Whole_weight-Shucked_weight
+ggplot(abalone[-abalone.outliers,],aes(x=Whole_weight, y=Shucked_weight)) + 
+  geom_point(color='Green')+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Whole_weight y Shucked_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=300, by=20))+
+  scale_x_continuous(breaks = seq(from=0, to=600, by=50))
+
+```
+
+Como podemos comprobar, aunque haya una correlación alta entre ambas variables, la dispersión de los puntos aumenta conforme aumenta el valor de las variables, incluso sin considerar los outliers univariados, por lo que se podría concluir que tenemos cierta heterocedasticidad. También hay unos cuantos outliers que podrían afectarnos a la regresión si consideramos la interacción de estas dos variables, Estos puntos son:
+
+```{r}
+abalone[-abalone.outliers,] %>% filter(Whole_weight<75,Shucked_weight>40)
+
+```
+
+Para el par de variables "Whole weight-Viscera weight":
+
+```{r}
+ggplot(abalone[-abalone.outliers,],aes(x=Whole_weight, y=Viscera_weight)) + 
+geom_point(color='Green')+  geom_smooth(method=lm, color='Red')+
+labs(title = 'Diagrama de dispersión entre Whole_weight y Viscera_weight')+
+scale_y_continuous(breaks = seq(from=0, to=150, by=10))+
+scale_x_continuous(breaks = seq(from=0, to=600, by=50))
+
+```
+
+Incluso sin considerar los outliers univariados, también tenemos bastante heterocedasticidad, lo cual es un problema a la hora de modelar una regresión. También se podría considerar que hay outliers multivariantes, aunque no es tan claro ya que podría ser por la dispersión que hay en los datos.
+
+Comprobamos si tenemos el mismo problema en el par "Whole weight-Shell weight":
+
+```{r}
+# Whole_weight-Shell_weight
+ggplot(abalone[-abalone.outliers],aes(x=Whole_weight, y=Shell_weight)) + 
+  geom_point(color='Green')+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Whole_weight y Shell_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=200, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=600, by=50))
+```
+
+También hay mucha dispersión en los datos, de hecho en este caso la recta de regresión dibujada sobre el diagrama de dispersión se ve desplazada y no modela bien los primeros datos de valores bajos.
+
+Esto nos lleva a cuestionarnos si el problema está en la variable "Whole  weight", para ello estudiamos los diagramas de dispersión del resto de variables de peso.
+
+Con el par "Shucked weight-Viscera weight":
+
+```{r}
+# Shucked_weight-Viscera_Weight
+ggplot(abalone[-abalone.outliers,],aes(x=Shucked_weight, y=Viscera_weight)) + 
+  geom_point(color='Green')+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Shucked_weight y Viscera_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=150, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=300, by=20))
+```
+
+Como podemos observar hay mayor dispersión, por lo que podemos descartar que la causa del problema sea la variable "Whole weight".
+
+Estudiando los dos últimos pares de variables de peso, "Shucked weight-Shell weight" y "Viscera weight-Shell weight":
+
+```{r}
+# Shucked_weight-Shell_weight
+ggplot(abalone,aes(x=Shucked_weight, y=Shell_weight)) + geom_point(color='Green')+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Shucked_weight y Shell_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=200, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=300, by=20))
+
+# Viscera_weight-Shell_weight
+ggplot(abalone,aes(x=Viscera_weight, y=Shell_weight)) + geom_point(color='Green')+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Viscera_weight y Shell_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=200, by=10))+
+  scale_x_continuous(breaks = seq(from=0, to=150, by=10))
+
+```
+
+Tampoco tenemos resultados favorables respecto a la dispersión de los datos. Esto sería un problema de cara a la regresión si utilizamos términos de interacción entre las variables de peso, ya que la dispersión van a depender de ellas y una de las asunciones para la regresión es que haya homocedasticidad. 
+
+En un principio pensaríamos en aplicar algún tipo de transformación de las variables; pero por la descripción de las variables, sabemos que "Whole weight" es el peso total del individuo, y que el resto de las variables de peso corresponden a pesos de las distintas partes (concha, vísceras y vianda). ¿Y si probásemos comparar el peso total con la suma del peso de las distintas partes? Obtendríamos el siguiente gráfico de dispersión:
+
+```{r}
+
+# Si sumamos las de peso:
+ggplot(abalone [-abalone.outliers,],aes(x=Whole_weight, y=Shell_weight+Viscera_weight
+                                        +Shucked_weight)) +
+geom_point(color='Green')+  geom_smooth(method=lm, color='Red')+
+labs(title = 'Diagrama de dispersión entre Whole_weight y la suma del resto de las 
+    variables de peso')+
+scale_y_continuous(breaks = seq(from=0, to=400, by=50))+
+scale_x_continuous(breaks = seq(from=0, to=500, by=50))
+```
+
+Se obtiene un mejor resultado en términos de homocedasticidad. El problema que teníamos es que para cada individuo la proporción de pesos de sus distintas partes podía variar en gran medida, esto se hace más aparente conforme el individuo crece. Por eso si sólo se comparan dos variables de peso puede haber mucha dispersión en los datos, especialmente para los individuos de mayor peso. Cabe destacar que todavía existe cierta dispersión, pero en este caso parece que es más uniforme conforme recorremos la recta de regresión. Esta dispersión se puede explicar en parte, si volvemos a leer la descripción de las variables, al peso perdido tras el sangrado y el secado en las variables "Viscera weight" y "Shell weight".
+
+Ahora sería interesante estudiar la relación entre las variables de tamaño y de peso, como hemos visto la variable "Whole weight" está muy relacionada con la suma del resto de variables de peso, por lo que se utilizará esta principalmente. Empezando por "Length-Whole weight" tenemos:
+
+```{r}
+ggplot(abalone [-abalone.outliers,],aes(x=Length, y=Whole_weight)) + geom_point(color='Cyan')+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre Length y Whole_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=400, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=150, by=10))
+```
+
+Podemos apreciar que el crecimiento del peso no se describe de forma lineal, si no más bien de forma cuadrática o cúbica. Esto es lógico ya que si asumimos una densidad constante, conforme el individuo crece en todas las direcciones del espacio, es decir que su volumen aumenta, su peso también aumentará. Si representamos el peso total con respecto al producto de las medidas de tamaño, tendremos:
+
+```{r}
+ggplot(abalone [-abalone.outliers,],aes(x=Length*Diameter*Height, y=Whole_weight)) + 
+  geom_point(color='Cyan')+  geom_smooth(method=lm, color='Red')+
+  labs(title = 'Diagrama de dispersión entre el producto de las variables de tamaño
+       y Whole_weight')+
+  scale_y_continuous(breaks = seq(from=0, to=400, by=50))+
+  scale_x_continuous(breaks = seq(from=0, to=800000, by=100000))
+```
+
+De este gráfico podemos concluir que el peso tiene una alta correlación con el producto de las tres variables de tamaño, aunque para obtener la relación exacta, habría que tener en cuenta las ecuaciones que describen la forma del abulón.
+
+A continuación se muestra una tabla resumen con los diagramas de dispersión para cada par de variables numéricas, y en la diagonal central el "QQ plot" de cada variable.
+
+```{r}
+# Resumen
+scatterplotMatrix(abalone[-abalone.outliers,] %>% select(-Sex,-Rings), diagonal = list(method="qqplot"),regLine = FALSE)
+```
+
+> *Gráficas bivariables entre los atributos y la variable de salida*
+
+Una vez analizadas las interacciones de las variables de entrada entre ellas, procedemos a analizar las variables numéricas continuas con respecto a la de salida. Para este caso se han incluido los outliers, ya que se podría considerar necesario modelar los valores extremos de anillos. Empezando por "Length-Rings":
+
+```{r}
+# Length-Rings
+ggplot(abalone,aes(x=Length, y=Rings)) + geom_point(color='Red')+  geom_smooth(method=lm, color='Blue')+
+  labs(title = 'Diagrama de dispersión entre Length y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+```
+
+Podemos comprobar que hay bastante heterocedasticidad, en la sección de transformación de datos se explicará que se puede hacer para contrarestar este efecto.
+
+Para el par "Diameter-Rings":
+
+```{r}
+ggplot(abalone,aes(x=Diameter, y=Rings)) + geom_point(color='Red')+  geom_smooth(method=lm, color='Blue')+
+  labs(title = 'Diagrama de dispersión entre Diameter y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+```
+
+Tenemos un resultado muy similar al anterior, no es de extrañar por la relación estrecha que hay entre estas dos variables.
+
+Para el par "Height-Rings" se han eliminado los outliers de "Height" por los valores extremos que dificultarían la visualización.
+
+```{r}
+# En este caso si es necesario eliminar los outliers de Height
+ggplot(abalone[-c(Height.outliers),],aes(x=Height, y=Rings)) + geom_point(color='Red')+  geom_smooth(method=lm, color='Blue')+
+  labs(title = 'Diagrama de dispersión entre Height y Rings', subtitle = 'Sin outliers de Height')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=50, by=2))
+```
+
+También hay heterocedasticidad, y esto puede dificultar la regresión sobre la variable de salida. Estas diferencias pueden darse por diversos motivos, ya sea por la especie de abulón o el medio en el que se encuentre (temperatura de las aguas, cantidad de alimento disponible, etc.).
+
+Ahora se estudiarán las variables de peso, comenzando por el par "Whole weight-Rings":
+
+```{r}
+# Whole_weight-Rings
+ggplot(abalone,aes(x=Whole_weight, y=Rings)) + geom_point(color='Red')+  geom_smooth(method=lm, color='Green')+
+  labs(title = 'Diagrama de dispersión entre Whole_weight y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=500, by=50))
+```
+
+Los datos se distribuyen con una relación que parece logarítmica o cuadrática inversa, en el apartado de transformación de los datos se estudiará esta relación en detalle. Por la relación que se ha explicado anteriormente entre las variables de peso, se espera que las gráficas de las siguientes tres variables no difieran mucho con respecto a la que acabamos de visualizar.
+
+Para el par "Shucked weight-Rings":
+```{r}
+# Shucked_weight-Rings
+ggplot(abalone,aes(x=Shucked_weight, y=Rings)) + geom_point(color='Red')+  geom_smooth(method=lm, color='Green')+
+  labs(title = 'Diagrama de dispersión entre Shucked_weight y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=300, by=20))
+```
+Muy parecida a la anterior, con una dispersión ligeramente diferente.
+
+Para "Viscera weight-Rings":
+
+```{r}
+# Viscera_weight-Rings
+ggplot(abalone,aes(x=Viscera_weight, y=Rings)) + geom_point(color='Red')+  geom_smooth(method=lm, color='Green')+
+  labs(title = 'Diagrama de dispersión entre Viscera_weight y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=150, by=10))
+  
+```
+Forma muy parecida a las anteriores como era de esperar.
+
+Y por último, "Shell weight-Rings":
+
+```{r}
+# Shell_weight-Rings
+ggplot(abalone,aes(x=Shell_weight, y=Rings)) + geom_point(color='Red')+  geom_smooth(method=lm, color='Green')+
+  labs(title = 'Diagrama de dispersión entre Shell_weight y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=200, by=10))
+
+```
+
+Forma muy similar a las demás variables de peso, aunque con bastantes puntos dispersos en los valores altos de la variable "Shell weight".
+
+
+### Descomposición de atributos complicados
+A la hora de modelar una regresión es importante considerar y transformar ciertas variables o valores que pueden ser problemáticos. Para este caso particular la variable "Sex" es la única categórica, y en principio al venir descrita mediante números enteros ("1" para "male", "2" para "female" y "3" para "infant"),  no tendríamos ningún conflicto al introducirlo al algoritmo de regresión como entrada. El problema viene que al utilizar enteros estamos introduciendo una noción de "orden" para una variable categórica cuyas categorías no están definidas mediante un orden. Para ello es necesario crear "dummy values", que no es otra cosa que descomponer esta variable en diferentes columnas según el número de categorías. Ahora nuestras observaciones que pertenecían a cierto grupo, tendrán el valor binario "1" en la columna que corresponde a su categoría y "0" en el resto. Hay que tener cuidado con crear muchas variables, ya que se puede caer en el problema de alta dimensionalidad y algoritmos basados por ejemplo en distancia como knn, se ven afectados negativamente en el sentido que las variables importantes pasan a contribuir menos al modelo cuando tenemos más variables a considerar.
+
+```{r}
+# Pasamos la variable categórica a valores binarios
+abalone.dummy <- dummy_cols(abalone,remove_selected_columns = TRUE)
+head(abalone.dummy)
+```
+
+Así quedaría el dataset tras la descomposición de la variable categórica en tres diferentes variables.
+
+### Búsqueda de datos redundantes
+
+La reducción de dimensionalidad es un aspecto importante a la hora de aplicar un algoritmo de regresión, por un lado nos permite contrarestar el problema de alta dimensionalidad, y por otro lado permite simplificar el modelo seleccionando las variables que mayor influencia tengan en la variable objetivo para realizar inferencias.
+
+Lo primero que podemos hacer es estudiar la correlacción que hay entre las variables. Para ello calculamos la matriz de correlación y la representamos. Puesto que de cara al problema se ha decidido eliminar los outliers, estos no se incluirán para calcular la correlación.
+
+```{r}
+# Estudiamos la correlación entre las variables mediante su matriz de correlacción
+abalone.CorMatrix <- cor(abalone[-c(abalone.outliers),-1])
+corrplot(abalone.CorMatrix, method = "number")
+```
+
+Nuestras variables de entrada numéricas están muy correlacionadas. Observando el gráfico se podría determinar las variables a descartar. Por un lado "Length" y "Diameter" tienen una alta correlación, por lo que se puede prescindir de una de ellas. Por otro lado las variables de peso tienen una correlación muy alta entre ellas, por lo que escogiendo las que menos correlación tienen con la salida, podríamos descartar "Shucked weight" y "Viscera weight".
+
+No obstante, se podría efectuar un análisis de componentes principales con nuestro conjunto de datos sin outliers para determinar las variables que contribuyen más a los componentes principales.
+
+```{r}
+abalone.pca <- PCA(abalone[-abalone.outliers,-c(1,9)], scale.unit = TRUE, ncp = 3, graph = FALSE)
+
+```
+Si extraemos los valores propios:
+
+```{r}
+get_eigenvalue(abalone.pca)
+```
+
+Observamos que con una dimensión ya se explica más del 80% de la variabilidad y con dos dimensiones ya se alcanzaría el 95.8%. Si representamos estas dos dimensiones con las variables:
+
+```{r}
+fviz_pca_var(abalone.pca, 
+             axes = c(1, 2),
+             col.var = "contrib",
+             gradient.cols = c("#00AFBB", 
+                               "#E7B800", "#FC4E07"),
+             repel = TRUE)
+
+```
+
+Si queremos saber la contribución exacta de cada variable en ambas dimensiones:
+
+```{r}
+get_eigenvalue(abalone.pca)
+```
+
+Representamos la contribución de las variables a ambas dimensiones para visualizar cuáles son las de mayor contribución:
+
+```{r}
+fviz_contrib(abalone.pca, 
+             choice = "var", 
+             axes = 1:2,
+             xtickslab.rt = 90,
+             top=8)
+```
+
+En definitiva, con tan sólo dos componentes principales ya se explica un gran porcentaje de la variabilidad de nuestras variables.
+
+Aunque la reducción de dimensionalidad tenga su utilidad, el estudio que hacemos de las variables siguiendo el método de "forward selection" o "backward selection" para la regresión lineal, ya nos permite seleccionar/descartar  las variables
+más importantes para el modelo.
+
+### Transformación de datos
+
+La transformación de los datos es un paso importante para asegurarnos que nuestro algoritmo de regresión funcione de forma óptima, es por ello que dependerá del algoritmo que vayamos a utilizar.
+
+
+
+Para knn al ser un algoritmo basado en distancias, debemos normalizar los datos. 
+```{r}
+abalone.scaled <- abalone.dummy %>% mutate_if(is.numeric, scale, center = TRUE, scale = TRUE)
+head(abalone.scaled)
+
+```
+
+En cuanto a las transformaciones mencionadas en apartados anteriores, para reducir la heterocedasticidad en la variable de salida se podría utilizar la función logarítmica. 
+
+Por ejemplo con respecto a la variable "Length" pasaríamos de tener:
+
+```{r}
+# Length-Rings
+ggplot(abalone,aes(x=Length, y=Rings)) + geom_point(color='Red')+  
+  geom_smooth(method=lm, color='Blue')+
+  labs(title = 'Diagrama de dispersión entre Length y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+```
+
+A este gráfico de dispersión:
+```{r}
+# Length-Rings
+ggplot(abalone,aes(x=Length, y=log(Rings))) + 
+  geom_point(color='Red')+  geom_smooth(method=lm, color='Blue')+
+  labs(title = 'Diagrama de dispersión entre Length y el logarítmo de Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=160, by=10))
+```
+
+Con esta transformación se consigue una dispersión más homogénea.
+
+En cuanto a la transformación para las variables de peso con respecto a la salida, se ha encontrado que utilizando la raíz cuadrada sobre la variable de entrada funcina bien, pasando de:
+```{r}
+# Whole_weight-Rings
+ggplot(abalone,aes(x=Whole_weight, y=Rings)) + geom_point(color='Red')+  
+  geom_smooth(method=lm, color='Green')+
+  labs(title = 'Diagrama de dispersión entre Whole_weight y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=500, by=50))
+```
+
+A esto:
+```{r}
+# Whole_weight-Rings
+ggplot(abalone,aes(x=sqrt(Whole_weight), y=Rings)) + geom_point(color='Red')+  
+  geom_smooth(method=lm, color='Green')+
+  labs(title = 'Diagrama de dispersión entre la raíz de Whole_weight y Rings')+
+  scale_y_continuous(breaks = seq(from=0, to=30, by=1))+
+  scale_x_continuous(breaks = seq(from=0, to=25, by=1))
+```
+
+Estas dos transformaciones se han seleccionado por mostrar mejores resultados y porque las variables transformadas mostraban un "skewness" positivo.
+
+## Conclusiones
+
+
+# Regresión
+
+Una vez realizado el análisis exploratorio de los datos, se procede a realizar el estudio de regresión sobre el dataset.
+
+Lo primero que debemos hacer es cargar los paquetes necesarios y los datos con los que trabajaremos, además de renombrar las variables.
+
+```{r}
+# Importamos kknn
+require(kknn)
+
+# cargamos dataset 
+abalone.reg <-read.csv("Input/abalone/abalone.dat", comment.char="@", header = FALSE)
+# Cambiamos nombres de las variables
+n <- length(names(abalone.reg)) - 1
+names(abalone.reg)[1:n] <- paste ("X", 1:n, sep="")
+names(abalone.reg)[n+1] <- "Y"
+
+str(abalone)
+```
+
+
+## Obtención de modelos de regresión lineal simple
+
+Para esta primera sección es necesario escoger cinco de los regresores disponibles que consideremos más relevantes. Fijándonos en el estudio con respecto a la variable de salida y en la matriz de correlación calculada de los atributos numéricos en la parte de análisis exploratio, se podría considerar que los atributos menos relevantes son: por un lado la variable categórica "Sex", que debido a su naturaleza no es muy útil para calcular una regresión con la variable de salida; y por otro lado, las variables "Shucked weight" y "Viscera weight" que tienen la menos correlación con la salida.
+
+Con esto en mente, se construyen los cinco regresores simples:
+
+
+```{r}
+# 1. Obtención de modelos lineales simples
+
+# X2 (Length):
+fitX2=lm(Y~X2,data=abalone.reg)
+summary(fitX2)
+
+
+# X3 (Diameter):
+fitX3=lm(Y~X3,data=abalone.reg)
+summary(fitX3)
+
+
+# X4 (Height):
+fitX4=lm(Y~X4,data=abalone.reg)
+summary(fitX4)
+
+
+# X5 (Whole_weight):
+fitX5=lm(Y~X5,data=abalone.reg)
+summary(fitX5)
+
+
+# X8 (Shell_weight):
+fitX8=lm(Y~X8,data=abalone.reg)
+summary(fitX8)
+
+
+```
+
+Se obtienen los resultados mostrados en la siguiente tabla:
+
+Regresor | R cuadrado  
+--------- | ------------
+X2 (Length) | 0.3099 
+X3 (Diameter) | 0.3302 
+X4 (Height) | 0.3108
+X5 (Whole weight) | 0.292
+X8 (Shell weight) | 0.3938
+
+Según los resultados obtrenidos, la variable "Shell weight" es la que mejores métricas ha obtenido no es de extrañar puesto que era de las que más correlación tenía con la salida. Por curiosidad, si aplicamos la transformación propuesta (raíz cuadrada) a la variable de entrada, obtendríamos el siguiente resultado:
+
+```{r}
+fitX8.sqrt=lm(Y~sqrt(X8),data=abalone.reg)
+summary(fitX8.sqrt)
+```
+
+Se mejora el modelo obteniéndose un R cuadrado de 0.4202.
+
+
+## Obtención de modelos de regresión lineal múltiple
+
+En esta sección el objetivo es encontrar un modelo de regresión lineal múltiple que describa la variable de salida de forma más precisa que el mejor modelo de regresión lineal simple obtenido. Para ello se deben seguir varios pasos, comenzando por encontrar el subconjunto de variables que sean más útiles, después buscar términos de interacción y por último introducir componentes no lineales.
+
+Para la selección de variables se ha seguido el método de "backward selection", que consiste en empezar con todas las variables en el modelo e ir descartando variables una a una según el p-valor obtenido.
+
+Con todas las variables tenemos el siguiente modelo:
+```{r}
+# Con todas las variables:
+fit1=lm(Y~., abalone.reg)
+summary(fit1)
+```
+En este primer paso observamos que la variable con mayor p-valor es la variable X2 (Length), por lo que decido retirarla y volver a calcular.
+
+```{r}
+fit2=lm(Y~.-X2, abalone.reg)
+summary(fit2)
+```
+
+Con el nuevo modelo los valores de R cuadrado y R cuadrado ajustado no han bajado, ya que la variable descartada tenía un p-valor mayor a 0.05.
+
+Aquí ya tendríamos las variables más útiles, pero podemos probar quitar la de mayor p-valor y ver que sucede.
+
+
+```{r}
+fit3=lm(Y~.-X2-X4, abalone.reg)
+summary(fit3)
+```
+
+Los valores de R cuadrado y R cuadrado ajustado han bajado muy poco y se ha podido descartar la variable X4 (Height), podemos aceptar esta pequeña pérdida a cambio de ganar simplicidad del modelo. Decido quedarme con este modelo y paso a estudiar términos de interacción. Cabe destacar que por el principio de jerarquía, las variables escogidas no se van a modificar aunque se introduzcan términos de interacción que hagan que el p-valor de la variable baje.
+
+Podemos probar relacionar la variable "Diameter" con la de sexo, aunque según lo que se ha estudiado no hay una relación grande.
+
+```{r}
+fit4=lm(Y~.-X2-X4+X1*X3, abalone.reg)
+summary(fit4)
+```
+Las métricas suben un poco, aunque puede ser interesante incluir información que relacione el tamaño con el peso. Pruebo introducir un término de interacción entre las variables "Diameter" y "Shell weight".
+
+```{r}
+fit5=lm(Y~.-X2-X4+X3*X8, abalone.reg)
+summary(fit5)
+```
+
+Tenemos una mejora notable con esta interacción. Probamos ahora incluir una interacción entre las dos variables de peso.
+```{r}
+# Comprobamos términos de interacción entre las variables de peso
+fit6=lm(Y~.-X2-X4+X3*X8+X5*X6, abalone.reg)
+summary(fit6)
+```
+
+Obtenemos algo de mejora, decido no incluir este término de interacción ya que complica el modelo y no se gana tanto en términos de mejora de R cuadrado y R cuadrado ajustado.
+
+Podríamos probar incluir la interacción como una división entre las variables de peso que hemos probado. Como hemos visto anteriormente, X5 (Whole weight) estaba muy relacionada con la suma de las otras tres variables de peso, por lo que con este término nos puede dar información sobre la proporción entre el peso total y el peso de la vianda.
+
+```{r}
+fit7=lm(Y~.-X2-X4+X3*X8+I(X5/X6), abalone.reg)
+summary(fit7)
+# Mejora más que el anterior
+```
+
+Este modelo mejora considerablemente con respecto a los dos anteriores con un valor de R cuadrado de 0.5613, por lo que decido quedarme con este. 
+
+Ahora es el momento de incluir algunas no linealidades, podemos probar utilizar la raíz cuadrada o el logaritmo para para corregir el "skewness" en las variables de peso.
+
+```{r}
+# Añadimos términos no lineales
+fit8=lm(Y~.-X2-X4+X3*X8+I(X5/X6)+I(sqrt(X8)), abalone.reg)
+summary(fit8)
+# No mejora mucho
+```
+
+Hay una leve mejoría en los valores de R cuadrado y el ajustado. Pruebo ahora con el logaritmo de la variable X6 (Shucked weight).
+
+```{r}
+
+fit9=lm(Y~.-X2-X4+X3*X8+I(X5/X6)+I(log(X6)), abalone.reg)
+summary(fit9)
+# mejora poco
+```
+
+Hay algo más de mejora que utilizando la raíz cuadrada, pero considero que el valor es muy pequeño como para incluir este término, ya que complica el modelo.
+
+Decido quedarme con el modelo "fit7" entonces.
+
+
+## Aplicar k-nn y el mejor modelo de regresión múltiple obtenido con validación cruzada
+
+Una vez encontrado un modelo que tenga buenas métricas pasamos a compararlo con el algoritmo de 
+"k-nearest neigbor". Para ellos los dos modelos se evaluarán utilizando las particiones de los datos de entrenamiento y de evaluación proporcionadas.
+
+Para compararlos se utilizará la media del error cuadrático medio obtenido en las cinco particiones. Empezando por knn tenemos:
+
+```{r}
+nombre <- "Input/abalone/abalone"
+
+#------------- 5-fold cross-validation KNN todas las variables
+
+run_knn_fold <- function(i, x, tt = "test") {
+  file <- paste(x, "-5-", i, "tra.dat", sep="")
+  x_tra <- read.csv(file, comment.char="@", header=FALSE)
+  file <- paste(x, "-5-", i, "tst.dat", sep="")
+  x_tst <- read.csv(file, comment.char="@", header=FALSE)
+  In <- length(names(x_tra)) - 1
+  names(x_tra)[1:In] <- paste ("X", 1:In, sep="")
+  names(x_tra)[In+1] <- "Y"
+  names(x_tst)[1:In] <- paste ("X", 1:In, sep="")
+  names(x_tst)[In+1] <- "Y"
+  if (tt == "train") {
+    test <- x_tra
+  }
+  else {
+    test <- x_tst
+  }
+  fitMulti=kknn(Y~.,x_tra,test)
+  yprime=fitMulti$fitted.values
+  sum(abs(test$Y-yprime)^2)/length(yprime) ##MSE
+}
+knnMSEtrain<-mean(sapply(1:5,run_knn_fold,nombre,"train"))
+knnMSEtest<-mean(sapply(1:5,run_knn_fold,nombre,"test"))
+```
+
+Y se obtienen los siguientes resultados:
+
+```{r}
+# Mostramos resultados
+print('Resultados modelo knn con todas las variables')
+print(knnMSEtrain)
+print(knnMSEtest)
+```
+
+En cuanto al mejor modelo obtenido, ejecutamos con una función similar:
+
+```{r}
+#------------- 5-fold cross-validation LM de las variables seleccionadas
+
+run_lm_fold <- function(i, x, tt = "test") {
+  file <- paste(x, "-5-", i, "tra.dat", sep="")
+  x_tra <- read.csv(file, comment.char="@", header=FALSE)
+  file <- paste(x, "-5-", i, "tst.dat", sep="")
+  x_tst <- read.csv(file, comment.char="@", header=FALSE)
+  In <- length(names(x_tra)) - 1
+  names(x_tra)[1:In] <- paste ("X", 1:In, sep="")
+  names(x_tra)[In+1] <- "Y"
+  names(x_tst)[1:In] <- paste ("X", 1:In, sep="")
+  names(x_tst)[In+1] <- "Y"
+  if (tt == "train") {
+    test <- x_tra
+  }
+  else {
+    test <- x_tst
+  }
+  fitMulti=lm(Y~.-X2-X4+X3*X8+I(X5/X6),x_tra)
+  yprime=predict(fitMulti,test)
+  sum(abs(test$Y-yprime)^2)/length(yprime) ##MSE
+}
+lmMSEtrain<-mean(sapply(1:5,run_lm_fold,nombre,"train"))
+lmMSEtest<-mean(sapply(1:5,run_lm_fold,nombre,"test"))
+
+
+```
+
+Obteniéndose los siguiuentes resultados:
+```{r}
+# Mostramos resultados
+print('Resultados modelo lineal con las variables seleccionadas')
+print(lmMSEtrain)
+print(lmMSEtest)
+```
+
+Curiosamente para los subconjuntos de entrenamiento, el algoritmo que ha obtenido un menor error ha sido knn con un valor de 2.217759 contra el valor de 4.55601 del modelo de regresión lineal múltiple. Pero si comparamos los resultados obtenidos en el subconjunto de "test", nuestro modelo obtiene un valor de error menor que knn, con un valor de 4.584297 para regresión lineal múltiple y  5.398169 para knn. Por lo que podemos concluir que el modelo obtenido tiene mayor capacidad de generalización al haber obtenido mejores métricas con los datos nuevos del subconjunto de "test".
+
+## Comparativa de algoritmos de regresión múltiple
+Para esta última parte, el objetivo es realizar una regresión lineal múltiple con todos los regresores y aplicando validación cruzada, e incluir los resultados tanto de este experimento como el de knn, en la tabla proporcionada. Una vez incluidos, se hace un estudio comparativo de los distintos algoritmos de regresión.
+
+Como se ha hecho anteriormente, aplicamos regresión lineal múltiple, pero esta vez sin quitar variables ni incluir términos nuevos.
+
+```{r}
+
+run_lm_fold <- function(i, x, tt = "test") {
+  file <- paste(x, "-5-", i, "tra.dat", sep="")
+  x_tra <- read.csv(file, comment.char="@", header=FALSE)
+  file <- paste(x, "-5-", i, "tst.dat", sep="")
+  x_tst <- read.csv(file, comment.char="@", header=FALSE)
+  In <- length(names(x_tra)) - 1
+  names(x_tra)[1:In] <- paste ("X", 1:In, sep="")
+  names(x_tra)[In+1] <- "Y"
+  names(x_tst)[1:In] <- paste ("X", 1:In, sep="")
+  names(x_tst)[In+1] <- "Y"
+  if (tt == "train") {
+    test <- x_tra
+  }
+  else {
+    test <- x_tst
+  }
+  fitMulti=lm(Y~.,x_tra)
+  yprime=predict(fitMulti,test)
+  sum(abs(test$Y-yprime)^2)/length(yprime) ##MSE
+}
+lmMSEtrain2<-mean(sapply(1:5,run_lm_fold,nombre,"train"))
+lmMSEtest2<-mean(sapply(1:5,run_lm_fold,nombre,"test"))
+```
+
+A lo que se obtienen los resultados:
+
+```{r}
+# Mostramos resultados
+print('Resultados modelo lineal con todas las variables')
+print(lmMSEtrain2)
+print(lmMSEtest2)
+```
+
+Con un error cuadrático medio de 4.81969 para la media de los subconjuntos de entrenamiento, y 4.942255 para los de evaluación.
+
+
+Para la evaluación de los algoritmos de regresión, lo primero que debemos hacer es cargar las tablas proporcionadas con los resultados para distintos datasets.
+
+```{r}
+#leemos la tabla con los errores medios de test
+resultados <- read.csv("input/Tablas/regr_test_alumnos.csv")
+tablatst <- cbind(resultados[,2:dim(resultados)[2]])
+colnames(tablatst) <- names(resultados)[2:dim(resultados)[2]]
+rownames(tablatst) <- resultados[,1]
+
+#leemos la tabla con los errores medios de entrenamiento
+resultados <- read.csv("input/Tablas/regr_train_alumnos.csv")
+tablatra <- cbind(resultados[,2:dim(resultados)[2]])
+colnames(tablatra) <- names(resultados)[2:dim(resultados)[2]]
+rownames(tablatra) <- resultados[,1]
+```
+
+Sustituimos los valores para nuestro dataset con los resultados obtenidos de ambos experimentos.
+
+```{r}
+# sustituimos valores obtenidos
+# en train
+tablatra['abalone','out_train_lm'] <- lmMSEtrain2
+tablatra['abalone','out_train_kknn'] <- knnMSEtrain
+# en test
+tablatst['abalone','out_test_lm'] <- lmMSEtest2
+tablatst['abalone','out_test_kknn'] <- knnMSEtest
+
+```
+
+El siguiente paso es normalizar la tabla de resultados para ambas tablas.
+
+```{r}
+# Normalizamos la tabla con el código propuesto
+##TABLA NORMALIZADA - lm (other) vs knn (ref) para WILCOXON
+# + 0.1 porque wilcox R falla para valores == 0 en la tabla
+
+# train
+difs <- (tablatra[,1] - tablatra[,2]) / tablatra[,1]
+wilc_1_2.tra <- cbind(ifelse (difs<0, abs(difs)+0.1, 0+0.1), ifelse (difs>0, 	abs(difs)+0.1, 0+0.1))
+colnames(wilc_1_2.tra) <- c(colnames(tablatra)[1], colnames(tablatra)[2])
+head(wilc_1_2.tra)
+
+
+# Test
+difs <- (tablatst[,1] - tablatst[,2]) / tablatst[,1]
+wilc_1_2.tst <- cbind(ifelse (difs<0, abs(difs)+0.1, 0+0.1), ifelse (difs>0, 	abs(difs)+0.1, 0+0.1))
+colnames(wilc_1_2.tst) <- c(colnames(tablatst)[1], colnames(tablatst)[2])
+head(wilc_1_2.tst)
+```
+
+Aplicamos el test de Wilcoxon para comparar el modelo de regresión múltiple con k-nn. Primero lo haremos sobre el subconjunto de entrenamiento.
+
+```{r}
+#Aplicación del test de WILCOXON
+# subconjunto de train
+LMvsKNNtra <- wilcox.test(wilc_1_2.tra[,1], wilc_1_2.tra[,2], alternative = "two.sided", paired=TRUE)
+Rmas <- LMvsKNNtra$statistic
+pvalue <- LMvsKNNtra$p.value
+LMvsKNNtra <- wilcox.test(wilc_1_2.tra[,2], wilc_1_2.tra[,1], alternative = "two.sided", paired=TRUE)
+Rmenos <- LMvsKNNtra$statistic
+Rmas
+Rmenos
+pvalue
+
+``` 
+
+Con un p-valor de 0.7660294 no podemos afirmar de que haya diferencias estadísticamente significativas entre ambos algoritmos.
+
+Para el subconjunto de "test":
+
+```{r}
+
+# subconjunto de test
+LMvsKNNtst <- wilcox.test(wilc_1_2.tst[,1], wilc_1_2.tst[,2], alternative = "two.sided", paired=TRUE)
+Rmas <- LMvsKNNtst$statistic
+pvalue <- LMvsKNNtst$p.value
+LMvsKNNtst <- wilcox.test(wilc_1_2.tst[,2], wilc_1_2.tst[,1], alternative = "two.sided", paired=TRUE)
+Rmenos <- LMvsKNNtst$statistic
+Rmas
+Rmenos
+pvalue
+
+```
+
+Se obtiene el mismo resultado que en el subconjunto de entrenamiento. Por lo que no podemos afirmar que haya diferencias estadísticamente significativas entre ambos algoritmos.
+
+El último paso sería comparar estos dos algoritmos junto al algoritmo M5' cuyos resultados tenemos en las tablas aplicando el test de Friedman. Se aplicará a ambos subconjuntos.
+
+```{r}
+#Aplicación del test de Friedman
+# Para train
+test_friedman.tra <- friedman.test(as.matrix(tablatra))
+test_friedman.tra
+# para test
+test_friedman.tst <- friedman.test(as.matrix(tablatst))
+test_friedman.tst
+```
+Obtenemos para ambas tablas un p-valor pequeño (menor a 0.05), que nos indica de que tenemos suficiente evidencia estadística para considerar que al menos dos de los algoritmos son diferentes entre ellos. Para obtener las comparativas, aplicamos pst-hoc de Holm.
+
+
+```{r}
+#Aplicación del test post-hoc de HOLM
+# train
+tam.tra <- dim(tablatra)
+groups.tra <- rep(1:tam.tra[2], each=tam.tra[1])
+pairwise.wilcox.test(as.matrix(tablatra), groups.tra, p.adjust = "holm", paired = TRUE)
+
+# test
+tam.tst <- dim(tablatst)
+groups.tst <- rep(1:tam.tst[2], each=tam.tst[1])
+pairwise.wilcox.test(as.matrix(tablatst), groups.tst, p.adjust = "holm", paired = TRUE)
+
+```
+
+Para la tabla con los resultados de los entrenamientos obtenemos un p-valor menor a 0.05 para todas las comparaciones, por lo que se puede decir con un 95% de confianza que los tres algoritmos tienen diferencias estadísticamente significativas.
+
+Si nos fijamos en los resultados para la tabla de "test" este resultado es bastante diferente. En este caso obtenemos la tabla con la comparativa entre los tres algoritmos, siendo el que mayor diferencias tiene M5 con un intevalo  de confianza cercano al 90%, puesto que los p-valores obtenidos son: 0.081 con respecto a lm y 0.108 con respecto a knn. Mientras knn y lm obtienen un p-valor de 0.580 entre ellos.

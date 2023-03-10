@@ -1,0 +1,342 @@
+---
+title: 'Dataset Clasificación: Vehicle'
+author: "Ricardo Ignacio Shepstone Aramburu"
+output:  
+  pdf_document:
+    toc: true
+    toc_depth: 4
+toc-title: "Índice"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Análisis exploratorio de datos
+## Definición del problema
+El dataset consta un conjunto de parámetros que describen la silueta bidimensional de un objeto tridimensional. Los datos se obtuvieron de las siluetas producidas por el HIPS (Sistema de Procesamiento de Imágen Jerárquico) enun experimento donde se usaron cuatro vehículos diferentes: un autobús, furgoneta Chevrolet, un Saab 9000 y un Opel Manta.
+
+El objetivo por lo tanto de este problema de clasificación será determinar a partir de los parámetros de las siluetas de estos vehículos determinar de qué vehículo se trata.
+
+En cuanto a la dependencia de las variables, tenemos que tener en cuenta que en la mayoría de las especies, un individuo crece en tamaño y aumenta en peso a lo largo de su vida, hasta llegar a cierto límite. Estas variables a su vez son dependientes entre ellas, ya que un individuo de mayor tamaño tendrá un peso mayor. Por otro lado, la edad no está directamente relacionada con el sexo, pero debido al dimorfismo sexual que existe en la mayoría de especies, el tamaño de un individuo puede verse afectado por su sexo en mayor o menor grado según la especie. En este caso particular, la variable de sexo tiene un tercer valor "Infant" que puede proporcionar cierta información sobre la edad del individuo, por lo que esta variable también tiene cierto grado de dependencia con el resto.
+
+En base a esta información se procede a plantear ciertas cuestiones e **hipótesis**:
+
+* El tamaño y el peso aumentan con la edad.
+* Si es así, ¿Que relacción hay con respecto al número de anillos?
+* ¿Alcanzan estas especies un límite de tamaño y peso?
+* ¿Cómo es la relación entre las variables de dimensión y las de peso?
+* ¿Aumentan todas las variables de tamaño en la misma proporción (están correlacionadas)?¿Y las de peso?
+* La variable sexo influye sobre las medidas físicas del individuo.
+* ¿Hay dimorfismo sexual?¿En qué grado?
+* ¿Qué relacción hay entre la edad y que un individuo sea joven ("infant") o adulto?
+
+
+
+## Preparación de los datos
+
+### Descripción de los datos
+
+Con el dataset de vehicle se construye un data frame con 846 observaciones y 19 variables. No se dispone de mucha información del dataset por lo que no se podrá proporcionar una descripción detallada sobre las variables. Pero en la siguiente lista se ha recopilado la poca información sobre las variables que hay disponible en el repositorio de UCI (<https://archive.ics.uci.edu/ml/datasets/Statlog+%28Vehicle+Silhouettes%29>)
+
+Nombre | Tipo de dato | Información 
+--------- | --------------- | -------------------------- 
+Compactness |  Cuantitativo discreto | (Perimetro medio)^2/area
+Circularity |   Cuantitativo discreto | (Radio medio)^2/area
+Distance circularity |   Cuantitativo discreto | area/(distancia media desde frontera)^2
+Radius ratio |   Cuantitativo discreto | (radio máx.-radio mín.)/radio medio
+Praxis aspect ratio |   Cuantitativo discreto | eje menor/eje mayor
+Max length aspect ratio |   Cuantitativo discreto | longitud perp. de máx. longitud/máx longitud
+Scatter ratio |  Cuantitativo discreto | inercia del eje menor/inercia del eje mayor
+Elongatedness |  Cuantitativo discreto | area/(ancho encogido)^2
+Praxis rectangular |  Cuantitativo discreto | area/(longitud eje*anchura eje)
+Length rectangular |  Cuantitativo discreto | area/(longitud máx.*longitud perp.)
+Major variance |  Cuantitativo discreto | momento de 2º orden en eje mayor/area
+Minor variance |  Cuantitativo discreto | momento de 2º orden en eje menor/area
+Gyration radius |  Cuantitativo discreto | (mavar+mivar)/area
+Major skewness |  Cuantitativo discreto | (momento de 3º orden en eje mayor)/sigma_min^3
+Minor skewness |  Cuantitativo discreto | (momento de 3º orden en eje menor)/sigma_maj^3
+Minor kurtosis |  Cuantitativo discreto | (momento de 4º orden en eje mayor)/sigma_min^4
+Major kurtosis |  Cuantitativo discreto | (momento de 4º orden en eje menor)/sigma_maj^4
+Hollows ratio |  Cuantitativo discreto | (area de huecos)/(area del polígono unido)
+Class |  Categórico nominal | Clase del vehículo
+
+La variable de salida es la clase de vehículo a predecir y las de entrada serán los parámetros obtenidos de las silueras.
+
+> *Importación de paquetes y del dataset.*
+
+Para empezar hay que incluir los paquetes que utilizaremos y cargar el dataset con el que se va a trabajar, además de cambiar los nombres de las variables.
+
+```{r message=FALSE, warning=FALSE}
+
+require(tidyverse)
+require(readr)
+require(moments)
+require(car)
+require(corrplot)
+
+# Cargamos dataset
+
+vehicle.raw <- read.csv("Input/vehicle/vehicle.dat", comment.char="@", header=FALSE)
+vehicle <- vehicle.raw
+
+# renombramos las variables para trabajar con ellas
+colnames(vehicle) <- c('Compactness','Circularity','Distance_circularity','Radius_ratio',
+                       'Praxis_aspect_ratio', 'Max_length_aspect_ratio', 'Scatter_ratio',
+                       'Elongatedness', 'Praxis_rectangular', 'Length_rectangular',
+                       'Major_variance', 'Minor_variance', 'Gyration_radius',
+                       'Major_skewness', 'Minor_skewness', 'Minor_kurtosis', 
+                       'Major_kurtosis', 'Hollows_ratio', 'Class')
+
+```
+
+Hacemos las comprobaciones y obtenemos los datos de interés, como el número de filas y columnas.
+
+```{r}
+#comprobamos número de columnas, filas y si se han cargado bien los datos, la estructura de estos
+nrow(vehicle)
+ncol(vehicle)
+str(vehicle)
+summary(vehicle)
+
+```
+
+Para este dataset no hace falta cambiar el formato.
+
+> *Limpieza de los datos: missing values*
+
+Se buscan los missing values y datos duplicados.
+
+```{r}
+# Comprobación de missing values
+sum(is.na(vehicle))
+sum(is.null(vehicle))
+
+# datos duplicados
+
+sum(duplicated(vehicle))
+```
+
+> *Limpieza de los datos: anomalías en una dimensión*
+
+Para la obtención de las anomalías, se calculan los cuartiles y el rango intercuartílico para determinar los límites superior e inferior. El valor de estos límites determina si el valor de una observación es atípico para una variable determinada.
+
+```{r}
+# Outliers en una dimensión
+# Calculamos rango intercuartílico de todas las variables
+vehicle.IQR <- vehicle %>% select(-Class) %>% apply(2, IQR)
+vehicle.Quartiles <- vehicle %>% select(-Class) %>% apply(2, quantile,c(0.25,0.75))
+Upper.limit <- vehicle.Quartiles[2,]+1.5*vehicle.IQR
+Upper.limit
+Lower.limit <- vehicle.Quartiles[1,]-1.5*vehicle.IQR
+Lower.limit
+```
+
+Con estos límites podremos determinar los outliers de cada variable, aquellos valores que estén por encima del umbral superior y por debajo del inferior serán considerados outliers. De esta forma calculamos las posiciones de los datos atípicos de cada atributo:
+
+```{r}
+
+# Obtenemos los outliers para cada variable y calculamos sus posiciones 
+# Compactness
+Compactness.outliers <- which(vehicle$Compactness>Upper.limit['Compactness'] | vehicle$Compactness<Lower.limit['Compactness'])
+# Circularity
+Circularity.outliers <- which(vehicle$Circularity>Upper.limit['Circularity'] | vehicle$Circularity<Lower.limit['Circularity'])
+# Distance_circularity
+Distance_circularity.outliers <- which(vehicle$Distance_circularity>Upper.limit['Distance_circularity'] | vehicle$Distance_circularity<Lower.limit['Distance_circularity'])
+# Radius_ratio
+Radius_ratio.outliers <- which(vehicle$Radius_ratio>Upper.limit['Radius_ratio'] | vehicle$Radius_ratio<Lower.limit['Radius_ratio'])
+# Praxis_aspect_ratio
+Praxis_aspect_ratio.outliers <- which(vehicle$Praxis_aspect_ratio>Upper.limit['Praxis_aspect_ratio'] | vehicle$Praxis_aspect_ratio<Lower.limit['Praxis_aspect_ratio'])
+# Max_length_aspect_ratio
+Max_length_aspect_ratio.outliers <- which(vehicle$Max_length_aspect_ratio>Upper.limit['Max_length_aspect_ratio'] | vehicle$Max_length_aspect_ratio<Lower.limit['Max_length_aspect_ratio'])
+# Scatter_ratio
+Scatter_ratio.outliers <- which(vehicle$Scatter_ratio>Upper.limit['Scatter_ratio'] | vehicle$Scatter_ratio<Lower.limit['Scatter_ratio'])
+# Elongatedness
+Elongatedness.outliers <- which(vehicle$Elongatedness>Upper.limit['Elongatedness'] | vehicle$Elongatedness<Lower.limit['Elongatedness'])
+# Praxis_rectangular
+Praxis_rectangular.outliers <- which(vehicle$Praxis_rectangular>Upper.limit['Praxis_rectangular'] | vehicle$Praxis_rectangular<Lower.limit['Praxis_rectangular'])
+# Length_rectangular
+Length_rectangular.outliers <- which(vehicle$Length_rectangular>Upper.limit['Length_rectangular'] | vehicle$Length_rectangular<Lower.limit['Length_rectangular'])
+# Major_variance
+Major_variance.outliers <- which(vehicle$Major_variance>Upper.limit['Major_variance'] | vehicle$Major_variance<Lower.limit['Major_variance'])
+# Minor_variance
+Minor_variance.outliers <- which(vehicle$Minor_variance>Upper.limit['Minor_variance'] | vehicle$Minor_variance<Lower.limit['Minor_variance'])
+# Gyration_radius 
+Gyration_radius.outliers <- which(vehicle$Gyration_radius>Upper.limit['Gyration_radius '] | vehicle$Gyration_radius<Lower.limit['Gyration_radius'])
+# Major_skewness
+Major_skewness.outliers <- which(vehicle$Major_skewness>Upper.limit['Major_skewness'] | vehicle$Major_skewness<Lower.limit['Major_skewness'])
+# Minor_skewness
+Minor_skewness.outliers <- which(vehicle$Minor_skewness>Upper.limit['Minor_skewness'] | vehicle$Minor_skewness<Lower.limit['Minor_skewness'])
+# Minor_kurtosis
+Minor_kurtosis.outliers <- which(vehicle$Minor_kurtosis>Upper.limit['Minor_kurtosis'] | vehicle$Minor_kurtosis<Lower.limit['Minor_kurtosis'])
+# Major_kurtosis
+Major_kurtosis.outliers <- which(vehicle$Major_kurtosis>Upper.limit['Major_kurtosis'] | vehicle$Major_kurtosis<Lower.limit['Major_kurtosis'])
+# Hollows_ratio
+Hollows_ratio.outliers <- which(vehicle$Hollows_ratio>Upper.limit['Hollows_ratio'] | vehicle$Hollows_ratio<Lower.limit['Hollows_ratio'])
+```
+
+Cabe destacar que muchas de las variables no tienen datos atípicos. En el análisis gráfico veremos en detalle que atributos tienen outliers y de qué tipo.
+
+También se ha calculado un vector que incluya las posiciones de todas las observaciones cuyas variables tomen al menos un valor atípico, es decir, se han calculado todas las observaciones atípicas. Veremos también que cantidad de outliers tenemos para tener una idea de la proporción de datos atípicos en el dataset.
+
+```{r}
+# Comprobamos cantidad de outliers 
+
+vehicle.outliers <- unique(c(Compactness.outliers, Circularity.outliers, 
+                             Distance_circularity.outliers, Radius_ratio.outliers, 
+                             Praxis_aspect_ratio.outliers, Max_length_aspect_ratio.outliers,
+                             Scatter_ratio.outliers, Elongatedness.outliers,
+                             Praxis_rectangular.outliers, Length_rectangular.outliers,
+                             Major_variance.outliers, Minor_variance.outliers,
+                             Gyration_radius.outliers, Major_skewness.outliers,
+                             Minor_skewness.outliers, Minor_kurtosis.outliers,
+                             Major_kurtosis.outliers, Hollows_ratio.outliers))
+
+length(vehicle.outliers)
+```
+
+Tan sólo tenemos 33 observaciones en las que almenos uno de sus atributos tome un valor atípico, en comparación a las 846 observaciones totales de las que disponemos, son menos de un 5% por lo que se considera que prescindir de ellos no afectaría negativamente a la clasificación.
+
+Podemos comprobar también en que proporción están distribuidos los outliers entre las diferentes clases.
+
+```{r}
+table(vehicle[vehicle.outliers,"Class"])
+```
+
+Teniendo en cuenta la cantidad de datos totales que tenemos por clase:
+```{r}
+# calculamos número de elementos por clase
+counts.Class <- table(vehicle$Class)
+counts.Class
+```
+
+Quitar los outliers podría desbalancear en cierta medida la clase "van" que ya se encuentra de manera algo menos frecuente que las demás.
+
+### Resumen de los datos
+
+En esta sección se realizará el estudio de las variables mediante diferentes medidas de estadística descriptiva y representaciones gráficas, tanto de cada variable individualmente, como de algunas combinaciones entre ellas y la de salida.
+
+> *Medidas de tendencia central*
+
+Nos permiten obtener cierta idea de centro de nuestros datos.
+
+```{r}
+# Para obtener estos valores:
+vehicle.mean <- vehicle %>% select(-Class) %>% map_dbl(mean)
+vehicle.median <- vehicle %>% select(-Class) %>% map_dbl(median)
+
+vehicle.mean
+vehicle.median
+```
+
+Estas dos medídas de tendencia central ya nos permiten tener cierta idea sobre la asimetría de las distribuciones. En este caso todas las variables menos "Hollows ratio" tienen una media mayor a la mediana, por lo que podríamos afirmar que el "skewness" es positivo. Más adelante se calcula esta medida y podremos comprobar si esta afirmación es cierta.
+
+> *Medidas de dispersión*
+
+Estas medidas nos proporcionan información de la dispersión de nuestros datos, y de la distancia a la que se encuentran del centro. Los cálculos para los cuartiles y el rango intercuartílico ya se ha hecho anteriormente para el estudio de los datos atípicos.
+
+```{r}
+# Medidas de dispersión
+# Para el Rango, máximo y mínimo:
+vehicle.min.max <- vehicle %>% select(-Class) %>% apply(2,range)
+vehicle.range <- vehicle.min.max[2,]-vehicle.min.max[1,]
+vehicle.min.max.range <- rbind(vehicle.min.max, vehicle.range)
+rownames(vehicle.min.max.range) <- c('min', 'max', 'range')
+vehicle.min.max.range             
+
+# primer cuartil, tercer cuartil y rango intercuartílico.
+vehicle.Quartiles
+vehicle.IQR
+
+# varianza, desviación típica y desviación absoluta de la mediana
+vehicle.var <- vehicle %>% select(-Class) %>% map_dbl(var)
+vehicle.sd <- vehicle %>% select(-Class) %>% map_dbl(sd)
+vehicle.mad <- vehicle %>% select(-Class) %>% map_dbl(mad)
+
+vehicle.var
+vehicle.sd 
+vehicle.mad
+```
+
+Las mayores varianzas se encuentran en las variables "Minor_variance", "Major_variance", "Gyration_radiusRadius_ratio" y "Scatter_ratio", esto será aparente al estudiar las distribuciones de estos atributos en el análisis gráfico por la escala que utilizan.
+
+
+> *Medidas de forma*
+
+Como su nombre indica, las medidas de forma nos proporcionan información sobre la forma de la distribución para una variable. Ya sea una medida de asimetría (skewness) o el tipo de pico que presenta (kurtosis).
+
+
+```{r}
+# Medidas de forma
+vehicle.skewness <- vehicle %>% select(-Class) %>% map_dbl(skewness)
+vehicle.kurtosis <- vehicle %>% select(-Class) %>% map_dbl(kurtosis)
+
+vehicle.skewness
+vehicle.kurtosis
+```
+
+Como se había mencionado anteriormente, efectivamente las distribuciones de todas las variables menos "Hollows_ratio" poseen un "skewness" positivo.
+En cuanto a la medida de kurtosis, parece ser que las distribuciones con un pico más pronunciado son "Praxis_aspect_ratio" y "Max_length_aspect_ratio".
+
+
+> *Comprobación de normalidad*
+
+Ciertos algoritmos de clasificación y muchos procesos estadísticos asumen que los datos se distribuyen normalemente, por ejemplo ciertos tests estadísticos requieren que nuestras variables se distribuyan normalmente. Para comprobar la normalidad de nuestros datos, se aplicará el test de Shapiro-Wilk. Más adelante se hará el estudio de normalidad por clase para comprobar las suposiciones que se hacen de cara a los clasificadores LDA y QDA.
+
+```{r}
+# Comprobamos normalidad con shapiro
+
+vehicle.shapiro <- apply(vehicle[,-19],2,shapiro.test)
+vehicle.shapiro
+```
+
+El p-valor que se obtiene para cada variable es muy bajo, menor al 0.05, por lo que el test nos informa a más de un 95% de confianza de que nuestras distribuciones son diferentes a una distribución normal.
+
+> *Gráficas univariables de los atributos*
+
+Para esta sección, se han realizado dos diagramas para cada variable: un histograma con curva de densidadpara apreciar mejor la distribución y un diagrama de cajas para visualizar la naturaleza de los datos atípicos. Empezando por la variable de salida, que es la única categórica podemos representar la cantidad de elementos por categoría:
+
+```{r}
+# Para la variable de salida Class
+barplot(counts.Class, main='Distribución por clase', xlab='clase',ylim = c(0,250))
+```
+Ya se ha mencionado anteriormente que la clase menos representada es la de "van", pero aún así no hay grandes desbalances entre las clases.
+
+Pasamos pues a estudiar las variables cuantitativas discretas, empezando por "Compactness":
+
+```{r}
+
+# Para Compactness
+ggplot(vehicle, aes(x=Compactness)) + 
+  geom_histogram(aes(y=stat(density)),bins=24, color='Blue',fill='Cyan')+
+  geom_density(lwd = 1.2,linetype = 1,colour = 6)+
+  labs(y='Compactness Density', title = 'Histograma y densidad de la variable Compactness')+
+  scale_y_continuous(breaks = seq(from=0, to=1, by=0.01))+
+  scale_x_continuous(breaks = seq(from=0, to=120, by=5))
+
+
+ggplot(vehicle, aes(y=Compactness)) + 
+  geom_boxplot(fill='Cyan',outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Compactness', title = 'Diagrama de cajas de la variable Compactness')+
+  scale_y_continuous(breaks = seq(from=0, to=120, by=5))
+```
+
+Se ha mencionado anteriormente que había ciertas variables que no tenían outliers, si nos fijamos en el diagrama de cajas, podemos ver que efectivamente esta es una de ellas. En cuanto a la distribucción se ve claramente el "skewness" positivo del que hemos hablado.
+
+Analizamos la variable "Circularity":
+
+```{r}
+
+# Para Circularity
+ggplot(vehicle, aes(x=Circularity)) + 
+  geom_histogram(aes(y=stat(density)),bins=27, color='Blue',fill='Cyan')+
+  geom_density(lwd = 1.2,linetype = 1,colour = 6)+
+  labs(y='Circularity Density', title = 'Histograma y densidad de la variable Circularity')+
+  scale_y_continuous(breaks = seq(from=0, to=1, by=0.01))+
+  scale_x_continuous(breaks = seq(from=0, to=60, by=2))
+
+
+ggplot(vehicle, aes(y=Circularity)) + 
+  geom_boxplot(fill='Cyan',outlier.colour = 'red', outlier.shape = 3)+
+  labs(y='Circularity', title = 'Diagrama de cajas de la variable Circularity')+
+  scale_y_continuous(breaks = seq(from=0, to=60, by=2))
+```
